@@ -1,7 +1,7 @@
 // Function to display the current date
 function displayDate() {
     const dateElement = document.getElementById("currentDate");
-    const today = new Date(); // Get the current date
+    const today = new Date();
 
     // Format the date (e.g., "October 22, 2024")
     const options = { year: 'numeric', month: 'long', day: 'numeric' };
@@ -11,8 +11,7 @@ function displayDate() {
     dateElement.textContent = formattedDate;
 }
 
-// Call the function to display the date
-displayDate();
+displayDate(); // Call the function to display the date
 
 let addButton = document.getElementById("addTask");
 let taskInput = document.getElementById("taskInput");
@@ -20,8 +19,23 @@ let taskList = document.getElementById("taskList");
 let note = document.querySelector(".note");
 let overflow = document.querySelector(".list-for-overflow");
 
-// Load tasks when the page loads
-loadTasks();
+let db;
+let request = indexedDB.open("taskDB", 1);
+
+request.onerror = function(event) {
+    console.log("Error opening IndexedDB:", event);
+};
+
+request.onsuccess = function(event) {
+    db = event.target.result;
+    loadTasks(); // Load tasks when the page loads
+};
+
+request.onupgradeneeded = function(event) {
+    db = event.target.result;
+    let objectStore = db.createObjectStore("tasks", { keyPath: "id", autoIncrement: true });
+    objectStore.createIndex("task", "task", { unique: false });
+}
 
 // Function to add a task
 function addTask() {
@@ -30,7 +44,6 @@ function addTask() {
     // Check if the input is empty
     if (task === "") {
         note.style.visibility = "visible"; // Show note if input is empty
-        
         return; // Exit the function if no task is entered
     } else {
         note.style.visibility = "hidden"; // Hide note if input is not empty
@@ -40,7 +53,7 @@ function addTask() {
     // Create and add the task to the list
     createTaskElement(task);
     taskInput.value = ""; // Clear input field
-    saveTasks(); // Save tasks to localStorage
+    saveTask(task); // Save tasks to IndexedDB
 }
 
 // Add event listener for the Add button
@@ -69,45 +82,70 @@ function createTaskElement(task) {
         }
     });
 
-    // Create point image
-    // let point = document.createElement("img");
-    // point.src = "/point.png"; // Adjust path as needed
-    // point.className = "point";
-
     // Create delete button for each task
     const deleteButton = document.createElement("button");
     deleteButton.textContent = 'Delete';
     deleteButton.className = "deleteTask";
     
-    // Append checkbox, point, and delete button to the task item
+    // Append checkbox and delete button to the task item
     listItem.prepend(checkbox); // Insert checkbox at the beginning
-    // listItem.appendChild(point);
     listItem.appendChild(deleteButton);
 
     // Delete task when the delete button is clicked
     deleteButton.addEventListener("click", () => {
         taskList.removeChild(listItem);
-        saveTasks(); // Save updated tasks after deletion
+        deleteTask(task); // Delete from IndexedDB
         checkNoteVisibility(); // Check visibility of the note after deletion
     });
 
     taskList.appendChild(listItem);
 }
 
-// Save tasks to localStorage
-function saveTasks() {
-    let tasks = [];
-    taskList.querySelectorAll('li').forEach(function (item) {
-        tasks.push(item.firstChild.textContent.trim()); // Only save task text
-    });
-    localStorage.setItem('tasks', JSON.stringify(tasks));
+// Save tasks to IndexedDB
+function saveTask(task) {
+    let transaction = db.transaction(["tasks"], "readwrite");
+    let objectStore = transaction.objectStore("tasks");
+
+    let request = objectStore.add({ task: task });
+    request.onerror = function(event) {
+        console.log("Error saving task:", event);
+    };
+    request.onsuccess = function(event) {
+        console.log("Task saved to IndexedDB");
+    };
 }
 
-// Load tasks from localStorage and display them
+// Load tasks from IndexedDB and display them
 function loadTasks() {
-    const tasks = JSON.parse(localStorage.getItem("tasks")) || [];
-    tasks.forEach(createTaskElement);
+    let transaction = db.transaction(["tasks"], "readonly");
+    let objectStore = transaction.objectStore("tasks");
+
+    objectStore.openCursor().onsuccess = function(event) {
+        let cursor = event.target.result;
+        if (cursor) {
+            createTaskElement(cursor.value.task); // Create element for each stored task
+            cursor.continue();
+        }
+    };
+
     checkNoteVisibility(); // Check visibility of the note on load
+}
+
+// Delete tasks from IndexedDB
+function deleteTask(task) {
+    let transaction = db.transaction(["tasks"], "readwrite");
+    let objectStore = transaction.objectStore("tasks");
+
+    let index = objectStore.index("task");
+    let request = index.openCursor(IDBKeyRange.only(task));
+
+    request.onsuccess = function(event) {
+        let cursor = event.target.result;
+        if (cursor) {
+            objectStore.delete(cursor.primaryKey); // Delete the task from IndexedDB
+            console.log("Task deleted from IndexedDB");
+        }
+    };
 }
 
 // Function to check visibility of the note based on the task list
